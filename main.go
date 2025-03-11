@@ -17,9 +17,9 @@ import (
 
 func main() {
 	numberSources := 3
-	numberDevices := 7
-	bufferSize := 500
-	lambda := 18.0
+	numberDevices := 6
+	bufferSize := 250
+	lambda := 5.0
 
 	numberRequest := 2500
 
@@ -27,7 +27,7 @@ func main() {
 	closedFlag1.Store(false)
 	closedFlag2 := atomic.Value{}
 	closedFlag2.Store(false)
-	log := make(logger.Logger, 100000)
+	log := make(logger.Logger, numberRequest*2)
 	wg := sync.WaitGroup{}
 	buf := queue.CreateCyclicQueue(bufferSize, log)
 	port := make(chan request.Request)
@@ -109,7 +109,7 @@ func StartLogger(log logger.Logger, bufferSize int, numSources int, numDevices i
 			case logger.Created:
 				sb.WriteString(fmt.Sprintf(logger.MesRequestCreated, curTime.Format(logger.TimeFormat), req.SourceID(), req.RequestID()))
 			case logger.Added:
-				sb.WriteString(fmt.Sprintf(logger.MesRequestAdded, curTime.Format(logger.TimeFormat), req.SourceID(), req.RequestID(), buffer.Rear()))
+				sb.WriteString(fmt.Sprintf(logger.MesRequestAdded, curTime.Format(logger.TimeFormat), req.SourceID(), req.RequestID(), ((buffer.Tail()-1)+buffer.Capacity())%buffer.Capacity()))
 				buffer.AddRequest(req)
 				bufferState = buffer.StringQueueStatus()
 			case logger.NotAdded:
@@ -121,7 +121,6 @@ func StartLogger(log logger.Logger, bufferSize int, numSources int, numDevices i
 				bufferState = buffer.StringQueueStatus()
 			case logger.Evicted:
 				sb.WriteString(fmt.Sprintf(logger.MesRequestEvicted, curTime.Format(logger.TimeFormat), req.SourceID(), req.RequestID()))
-				buffer.EvictRequest()
 				bufferState = buffer.StringQueueStatus()
 				evictReqs[req.SourceID()-1] += 1
 			case logger.Processing:
@@ -149,7 +148,7 @@ func StartLogger(log logger.Logger, bufferSize int, numSources int, numDevices i
 			sb.WriteString(bufferState)
 			sb.WriteString(devicesState)
 			sb.WriteString("----------------------------------------------------------------------------------------------------------")
-			fmt.Println(sb.String())
+			// fmt.Println(sb.String())
 			sb.Reset()
 		}
 		wg.Done()
@@ -173,6 +172,7 @@ func FinalStatistics(devices []time.Duration, totalTime time.Duration, processed
 	sb.WriteString(fmt.Sprintf("%-14s %-14s %-14s %-18s %-14s %-16s %-18s %-18s %-18s\n", "Source ID", "Total Req", "Evicted Req", "Eviction Factor", "Avg T(total)", "Avg T(buffer)", "Avg T(processed)", "Disp(buffer)", "Disp(processed)"))
 	totalReq := 0
 	totalEvict := 0
+
 	for i := 0; i < len(processedReq); i++ {
 		var (
 			totalReqTime     uint64
@@ -186,23 +186,25 @@ func FinalStatistics(devices []time.Duration, totalTime time.Duration, processed
 			bufferReqTime += uint64(processedReq[i][j].WaitTime.Microseconds())
 			processedReqTime += uint64((processedReq[i][j].TotalTime - processedReq[i][j].WaitTime).Microseconds())
 		}
-		avgTotal := totalReqTime / uint64(len(processedReq[i]))
-		avgBuffer := bufferReqTime / uint64(len(processedReq[i]))
-		avgProcessed := processedReqTime / uint64(len(processedReq[i]))
+		avgTotal := int(totalReqTime) / len(processedReq[i])
+		avgBuffer := int(bufferReqTime) / len(processedReq[i])
+		avgProcessed := int(processedReqTime) / len(processedReq[i])
 		for j := 0; j < len(processedReq[i]); j++ {
-			a := (uint64(processedReq[i][j].WaitTime.Microseconds()) - avgBuffer)
-			dispBuffer += a * a
-			aa := (uint64((processedReq[i][j].TotalTime - processedReq[i][j].WaitTime).Microseconds()) - avgProcessed)
-			dispProcessed += aa * aa
+			a := (processedReq[i][j].WaitTime.Milliseconds() - int64(avgBuffer/1000))
+			dispBuffer += uint64(a * a)
+
+			aa := ((processedReq[i][j].TotalTime - processedReq[i][j].WaitTime).Milliseconds() - int64(avgProcessed/1000))
+			dispProcessed += uint64(aa * aa)
 		}
+
 		iTotalReq := len(processedReq[i]) + evictReq[i]
 		totalReq += iTotalReq
 		totalEvict += evictReq[i]
 		fAvgTotal := float64(avgTotal) / 1000.0
 		fAvgBuffer := float64(avgBuffer) / 1000.0
 		fAvgProcessed := float64(avgProcessed) / 1000.0
-		dispB := float64(dispBuffer/uint64(len(processedReq[i]))) / 1000.0
-		dispP := float64(dispProcessed/uint64(len(processedReq[i]))) / 1000.0
+		dispB := float64(dispBuffer / uint64(len(processedReq[i])))
+		dispP := float64(dispProcessed / uint64(len(processedReq[i])))
 		evictionFactor := float64(evictReq[i]) / float64(iTotalReq)
 		mes := "%-14v %-14v %-14v %-18.2f %-14.2f %-16.2f %-18.2f %-18.2f %-18.2f\n"
 		sb.WriteString(fmt.Sprintf(mes, i+1, iTotalReq, evictReq[i], evictionFactor, fAvgTotal, fAvgBuffer, fAvgProcessed, dispB, dispP))

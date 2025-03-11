@@ -10,92 +10,92 @@ import (
 )
 
 type CyclicQueue struct {
-	mutex    sync.Mutex
-	requests []request.Request
-	front    int
-	size     int
-	logger   logger.Logger
+	buffer           []request.Request
+	head, tail, size int
+	mutex            sync.Mutex
+	logger           logger.Logger
 }
 
-func (q *CyclicQueue) getRequest() request.Request {
-	if q.size == 0 {
-		return request.Request{}
+func (queue *CyclicQueue) Tail() int {
+	return queue.tail
+}
+
+func (queue *CyclicQueue) Capacity() int {
+	return cap(queue.buffer)
+}
+
+func (queue *CyclicQueue) IsFull() bool {
+	return queue.size == cap(queue.buffer)
+}
+
+func (queue *CyclicQueue) IsEmpty() bool {
+	return queue.size == 0
+}
+
+func CreateCyclicQueue(capacity int, log logger.Logger) *CyclicQueue {
+	return &CyclicQueue{
+		buffer: make([]request.Request, capacity),
+		head:   0,
+		tail:   0,
+		size:   0,
+		mutex:  sync.Mutex{},
+		logger: log,
 	}
-	req := q.requests[q.front]
-	q.requests[q.front] = request.Request{}
-	q.front = (q.front + 1) % cap(q.requests)
-	q.size -= 1
-	return req
 }
 
-func CreateCyclicQueue(size int, log logger.Logger) *CyclicQueue {
-	tempBuff := make([]request.Request, size)
-	queue := CyclicQueue{sync.Mutex{}, tempBuff, 0, 0, log}
-	return &queue
-}
+func (q *CyclicQueue) AddRequest(req request.Request) request.Request {
+	for !q.mutex.TryLock() {
+	}
+	defer q.mutex.Unlock()
 
-func (q *CyclicQueue) AddRequest(req request.Request) bool {
-	q.mutex.Lock()
-
-	if q.size == cap(q.requests) {
+	returnReq := req
+	if q.IsFull() {
 		if q.logger != nil {
 			q.logger <- logger.LogInfo{Req: req, CurrentTime: time.Now(), OperationType: logger.NotAdded}
 		}
-		return false
-	} else {
-		rear := (q.front + q.size) % cap(q.requests)
-		q.requests[rear] = req
-		q.size += 1
+		returnReq = q.buffer[q.head]
+		q.head = (q.head + 1) % cap(q.buffer)
 		if q.logger != nil {
-			q.logger <- logger.LogInfo{Req: req, CurrentTime: time.Now(), OperationType: logger.Added}
+			q.logger <- logger.LogInfo{Req: returnReq, CurrentTime: time.Now(), OperationType: logger.Evicted}
 		}
-		q.mutex.Unlock()
-		return true
+	} else {
+		q.size++
 	}
+	q.buffer[q.tail] = req
+	q.tail = (q.tail + 1) % cap(q.buffer)
+	if q.logger != nil {
+		q.logger <- logger.LogInfo{Req: req, CurrentTime: time.Now(), OperationType: logger.Added}
+	}
+	return returnReq
 }
 
 func (q *CyclicQueue) GetRequest() request.Request {
-	q.mutex.Lock()
+	for !q.mutex.TryLock() {
+	}
 	defer q.mutex.Unlock()
 
-	req := q.getRequest()
-	if req.SourceID() == 0 {
-		return req
+	if q.IsEmpty() {
+		return request.Request{}
 	}
+	returnReq := q.buffer[q.head]
+	q.head = (q.head + 1) % cap(q.buffer)
+	q.size--
 	if q.logger != nil {
-		q.logger <- logger.LogInfo{Req: req, CurrentTime: time.Now(), OperationType: logger.Received}
+		q.logger <- logger.LogInfo{Req: returnReq, CurrentTime: time.Now(), OperationType: logger.Received}
 	}
-	return req
-}
-
-func (q *CyclicQueue) EvictRequest() request.Request {
-	defer q.mutex.Unlock()
-
-	req := q.getRequest()
-	if q.logger != nil {
-		q.logger <- logger.LogInfo{Req: req, CurrentTime: time.Now(), OperationType: logger.Evicted}
-	}
-	return req
-}
-
-func (q *CyclicQueue) Rear() int {
-	return (q.front + q.size) % cap(q.requests)
+	return returnReq
 }
 
 func (q *CyclicQueue) StringQueueStatus() string {
 	sb := strings.Builder{}
-	sb.WriteString(fmt.Sprintf("Buffer[%v/%v]: [", q.size, cap(q.requests)))
-	for i := 0; i < len(q.requests); i++ {
-		if q.requests[i].SourceID() != 0 {
-			sb.WriteString(fmt.Sprintf(" %v:%v", q.requests[i].SourceID(), q.requests[i].RequestID()))
+	sb.WriteString(fmt.Sprintf("Buffer[%v/%v]: [", q.size, cap(q.buffer)))
+	for i := 0; i < len(q.buffer); i++ {
+		if q.buffer[i].SourceID() != 0 {
+			sb.WriteString(fmt.Sprintf(" %v:%v", q.buffer[i].SourceID(), q.buffer[i].RequestID()))
 		} else {
 			sb.WriteString(" -")
 		}
 	}
 	sb.WriteString(" ].\n                   ")
 	return sb.String()
-}
-
-func (q *CyclicQueue) Size() int {
-	return q.size
 }

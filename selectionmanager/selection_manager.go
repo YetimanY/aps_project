@@ -23,7 +23,7 @@ func CreateSM(psPool []processingsystem.ProcessingSystem, buf *queue.CyclicQueue
 
 func (pm *SelectionManager) Start() bool {
 	go func() {
-		for pm.closedFlag.Load() == false || pm.buffer.Size() != 0 {
+		for pm.closedFlag.Load() == false || !pm.buffer.IsEmpty() {
 			req := pm.buffer.GetRequest()
 			if req.SourceID() == 0 || req.RequestID() == 0 {
 				continue

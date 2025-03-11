@@ -27,9 +27,7 @@ func (pm *ProductionManager) Start() bool {
 				break
 			}
 			pm.numRequest++
-			for !pm.buffer.AddRequest(req) {
-				pm.buffer.EvictRequest()
-			}
+			pm.buffer.AddRequest(req)
 		}
 		pm.wg.Done()
 	}()

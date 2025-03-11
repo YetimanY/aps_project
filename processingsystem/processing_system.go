@@ -4,8 +4,6 @@ import (
 	"aps/logger"
 	"aps/request"
 	"time"
-
-	"math/rand"
 )
 
 type ProcessingSystem struct {
@@ -29,7 +27,8 @@ func (ps *ProcessingSystem) Start() {
 			startTimeProcessing := time.Now()
 			req.WaitTime = startTimeProcessing.Sub(req.CreationTime())
 
-			delay := time.Microsecond * time.Duration(rand.Int63n(450)+50)
+			// delay := time.Microsecond * time.Duration(rand.Int63n(450)+50)
+			delay := time.Millisecond
 			startTime := time.Now()
 			for time.Since(startTime) < delay {
 			}
