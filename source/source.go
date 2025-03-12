@@ -25,7 +25,7 @@ func CreateSource(id uint64, lambda float64, portPM chan request.Request, logger
 func (s *Source) Start() {
 	go func() {
 		for rID := 1; s.closedFlag.Load() == false; rID++ {
-			delay := time.Microsecond * time.Duration(rand.ExpFloat64()/s.lambda*1000)
+			delay := time.Microsecond * time.Duration(rand.ExpFloat64()/s.lambda*10000)
 			startTime := time.Now()
 			for time.Since(startTime) < delay {
 			}

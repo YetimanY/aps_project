@@ -16,10 +16,10 @@ import (
 )
 
 func main() {
-	numberSources := 4
-	numberDevices := 8
-	bufferSize := 250
-	lambda := 1.0
+	numberSources := 3
+	numberDevices := 5
+	bufferSize := 25
+	lambda := 3.5
 
 	numberRequest := 2500
 
