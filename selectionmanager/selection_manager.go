@@ -28,21 +28,19 @@ func (pm *SelectionManager) Start() bool {
 			if req.SourceID() == 0 || req.RequestID() == 0 {
 				continue
 			}
-		loop:
 			for i := 0; ; i = (i + 1) % cap(pm.processingSystemPool) {
-				select {
-				case pm.processingSystemPool[i].RequestPort <- req:
+				if pm.processingSystemPool[i].Status() == 0 {
 					pm.logger <- logger.LogInfo{AuthorID: uint64(i + 1), Req: req, CurrentTime: time.Now(), OperationType: logger.Processing}
-					break loop
-				default:
-					continue loop
+					pm.processingSystemPool[i].SendRequest(req)
+					break
 				}
 			}
 		}
 
 		for i := 0; i < cap(pm.processingSystemPool); i++ {
-			close(pm.processingSystemPool[i].RequestPort)
-			for pm.processingSystemPool[i].Alive == true {
+			pm.processingSystemPool[i].Interrupt()
+			// fmt.Println(i)
+			for pm.processingSystemPool[i].Status() != -1 {
 			}
 		}
 		pm.wg.Done()

@@ -16,10 +16,10 @@ import (
 )
 
 func main() {
-	numberSources := 3
-	numberDevices := 6
+	numberSources := 4
+	numberDevices := 8
 	bufferSize := 250
-	lambda := 5.0
+	lambda := 1.0
 
 	numberRequest := 2500
 
@@ -36,7 +36,7 @@ func main() {
 
 	pss := make([]processingsystem.ProcessingSystem, numberDevices)
 	for i := 0; i < numberDevices; i++ {
-		pss[i] = *processingsystem.CreateProcessingSystem(uint64(i+1), make(chan request.Request), log)
+		pss[i] = *processingsystem.CreateProcessingSystem(uint64(i+1), log)
 	}
 	sm := selectionmanager.CreateSM(pss, buf, log, &closedFlag2, &wg)
 	pm := productionmanager.CreatePM(port, buf, log, &wg)
