@@ -15,14 +15,15 @@ import (
 	"time"
 )
 
+const (
+	numberSources = 3
+	numberDevices = 5
+	bufferSize    = 25
+	lambda        = 3.5
+	numberRequest = 2500
+)
+
 func main() {
-	numberSources := 3
-	numberDevices := 5
-	bufferSize := 25
-	lambda := 3.5
-
-	numberRequest := 2500
-
 	closedFlag1 := atomic.Value{}
 	closedFlag1.Store(false)
 	closedFlag2 := atomic.Value{}
@@ -77,7 +78,7 @@ func main() {
 func StartLogger(log logger.Logger, bufferSize int, numSources int, numDevices int, wg *sync.WaitGroup) {
 	go func() {
 		buffer := queue.CreateCyclicQueue(bufferSize, nil)
-		bufferState := buffer.StringQueueStatus()
+		bufferState := buffer.StringState()
 
 		evictReqs := make([]int, numSources)
 		processedReq := make([][]request.Request, numSources)
@@ -90,6 +91,7 @@ func StartLogger(log logger.Logger, bufferSize int, numSources int, numDevices i
 		devicesTime := make([]time.Duration, numDevices)
 		devicesState := StringDevicesState(devices)
 
+		offsetString := "\n                   "
 		var (
 			systemStartTime time.Time
 			systemEndTime   time.Time
@@ -109,26 +111,26 @@ func StartLogger(log logger.Logger, bufferSize int, numSources int, numDevices i
 			case logger.Created:
 				sb.WriteString(fmt.Sprintf(logger.MesRequestCreated, curTime.Format(logger.TimeFormat), req.SourceID(), req.RequestID()))
 			case logger.Added:
-				sb.WriteString(fmt.Sprintf(logger.MesRequestAdded, curTime.Format(logger.TimeFormat), req.SourceID(), req.RequestID(), ((buffer.Tail()-1)+buffer.Capacity())%buffer.Capacity()))
+				sb.WriteString(fmt.Sprintf(logger.MesRequestAdded, curTime.Format(logger.TimeFormat), req.SourceID(), req.RequestID(), ((buffer.Tail())+buffer.Capacity())%buffer.Capacity()))
 				buffer.AddRequest(req)
-				bufferState = buffer.StringQueueStatus()
+				bufferState = buffer.StringState()
 			case logger.NotAdded:
 				sb.WriteString(fmt.Sprintf(logger.MesRequestNotAdded, curTime.Format(logger.TimeFormat), req.SourceID(), req.RequestID()))
-				buffer.AddRequest(req)
 			case logger.Received:
 				sb.WriteString(fmt.Sprintf(logger.MesRequestReceived, curTime.Format(logger.TimeFormat), req.SourceID(), req.RequestID()))
 				buffer.GetRequest()
-				bufferState = buffer.StringQueueStatus()
+				bufferState = buffer.StringState()
 			case logger.Evicted:
 				sb.WriteString(fmt.Sprintf(logger.MesRequestEvicted, curTime.Format(logger.TimeFormat), req.SourceID(), req.RequestID()))
-				bufferState = buffer.StringQueueStatus()
+				buffer.GetRequest()
+				bufferState = buffer.StringState()
 				evictReqs[req.SourceID()-1] += 1
 			case logger.Processing:
 				sb.WriteString(fmt.Sprintf(logger.MesRequestSentProcessing, curTime.Format(logger.TimeFormat), req.SourceID(), req.RequestID(), authorID))
 				devices[authorID-1] = fmt.Sprintf(deviceMes, authorID, req.SourceID(), req.RequestID(), "busy")
 				devicesState = StringDevicesState(devices)
 			case logger.Processed:
-				sb.WriteString(fmt.Sprintf(logger.MesRequestProcessed, curTime.Format(logger.TimeFormat), req.SourceID(), req.RequestID(), req.WaitTime, req.TotalTime, authorID))
+				sb.WriteString(fmt.Sprintf(logger.MesRequestProcessed, curTime.Format(logger.TimeFormat), req.SourceID(), req.RequestID(), req.TotalTime, authorID))
 				devices[authorID-1] = fmt.Sprintf(deviceMes, authorID, 0, 0, "free")
 				devicesState = StringDevicesState(devices)
 				devicesTime[authorID-1] += req.TotalTime - req.WaitTime
@@ -136,16 +138,19 @@ func StartLogger(log logger.Logger, bufferSize int, numSources int, numDevices i
 			case logger.SystemRunning:
 				systemStartTime = curTime
 				fmt.Println(fmt.Sprintf(logger.MesSystemRunning, curTime.Format(logger.TimeFormat)))
+				fmt.Println("----------------------------------------------------------------------------------------------------------")
 				continue loop
 			case logger.SystemStopped:
 				systemEndTime = curTime
 				totalTimeSystem := systemEndTime.Sub(systemStartTime)
 				fmt.Println(fmt.Sprintf(logger.MesSystemStopped, curTime.Format(logger.TimeFormat), totalTimeSystem))
+				fmt.Println()
 				fmt.Println(FinalStatistics(devicesTime, totalTimeSystem, processedReq, evictReqs))
 				break loop
 			}
-			bufferState = ""
+			sb.WriteString(offsetString)
 			sb.WriteString(bufferState)
+			sb.WriteString(offsetString)
 			sb.WriteString(devicesState)
 			sb.WriteString("----------------------------------------------------------------------------------------------------------")
 			// fmt.Println(sb.String())
@@ -169,7 +174,7 @@ func StringDevicesState(devices []string) string {
 func FinalStatistics(devices []time.Duration, totalTime time.Duration, processedReq [][]request.Request, evictReq []int) string {
 	sb := strings.Builder{}
 	sb.WriteString("Sources statistics\n")
-	sb.WriteString(fmt.Sprintf("%-14s %-14s %-14s %-18s %-14s %-16s %-18s %-18s %-18s\n", "Source ID", "Total Req", "Evicted Req", "Eviction Factor", "Avg T(total)", "Avg T(buffer)", "Avg T(processed)", "Disp(buffer)", "Disp(processed)"))
+	sb.WriteString(fmt.Sprintf("%-14s|%-14s|%-14s|%-18s|%-14s|%-16s|%-18s|%-18s|%-18s|\n", "Source ID", "Total Req", "Evicted Req", "Eviction Factor", "Avg T(total)", "Avg T(buffer)", "Avg T(processed)", "Disp(buffer)", "Disp(processed)"))
 	totalReq := 0
 	totalEvict := 0
 
@@ -193,28 +198,29 @@ func FinalStatistics(devices []time.Duration, totalTime time.Duration, processed
 			a := (processedReq[i][j].WaitTime.Milliseconds() - int64(avgBuffer/1000))
 			dispBuffer += uint64(a * a)
 
-			aa := ((processedReq[i][j].TotalTime - processedReq[i][j].WaitTime).Milliseconds() - int64(avgProcessed/1000))
+			aa := ((processedReq[i][j].TotalTime - processedReq[i][j].WaitTime).Microseconds() - int64(avgProcessed))
 			dispProcessed += uint64(aa * aa)
 		}
 
 		iTotalReq := len(processedReq[i]) + evictReq[i]
 		totalReq += iTotalReq
 		totalEvict += evictReq[i]
-		fAvgTotal := float64(avgTotal) / 1000.0
-		fAvgBuffer := float64(avgBuffer) / 1000.0
-		fAvgProcessed := float64(avgProcessed) / 1000.0
-		dispB := float64(dispBuffer / uint64(len(processedReq[i])))
-		dispP := float64(dispProcessed / uint64(len(processedReq[i])))
+		fAvgTotal := fmt.Sprintf("%.2fms", float64(avgTotal)/1000.0)
+		fAvgBuffer := fmt.Sprintf("%.2fms", float64(avgBuffer)/1000.0)
+		fAvgProcessed := fmt.Sprintf("%.2fms", float64(avgProcessed)/1000.0)
+		dispB := fmt.Sprintf("%dms", dispBuffer/uint64(len(processedReq[i])))
+		dispP := fmt.Sprintf("%dµs", dispProcessed/uint64(len(processedReq[i])))
 		evictionFactor := float64(evictReq[i]) / float64(iTotalReq)
-		mes := "%-14v %-14v %-14v %-18.2f %-14.2f %-16.2f %-18.2f %-18.2f %-18.2f\n"
+		mes := "%-14v|%-14v|%-14v|%-18.2f|%-14v|%-16v|%-18v|%-18v|%-18v|\n"
 		sb.WriteString(fmt.Sprintf(mes, i+1, iTotalReq, evictReq[i], evictionFactor, fAvgTotal, fAvgBuffer, fAvgProcessed, dispB, dispP))
 	}
-	sb.WriteString(fmt.Sprintf("%-14v %-14v %-14v %-18.2f\n", "Total", totalReq, totalEvict, float64(totalEvict)/float64(totalReq)))
-	sb.WriteString("-----------------------------------------------------------------------------------------------------------------------------------\n\n")
+	sb.WriteString("---------------------------------------------------------------------------------------------------------------------------------------------------------\n")
+	sb.WriteString(fmt.Sprintf("%-14v|%-14v|%-14v|%-18.2f|\n", "Total", totalReq, totalEvict, float64(totalEvict)/float64(totalReq)))
+	sb.WriteString("----------------------------------------------------------------\n\n")
 	sb.WriteString("Devices statistics\n")
-	sb.WriteString(fmt.Sprintf("%-14s %-20s %s\n", "Device ID", "Utilization Factor", "Total Active Time"))
+	sb.WriteString(fmt.Sprintf("%-14s|%-20s|%-20s|\n", "Device ID", "Utilization Factor", "Total Active Time"))
 	for i := 0; i < cap(devices); i++ {
-		sb.WriteString(fmt.Sprintf("%-14v %-20.2f %v\n", i+1, float64(devices[i])/float64(totalTime), devices[i]))
+		sb.WriteString(fmt.Sprintf("%-14v|%-20.2f|%-20v|\n", i+1, float64(devices[i])/float64(totalTime), devices[i]))
 	}
 	return sb.String()
 }

@@ -44,8 +44,7 @@ func CreateCyclicQueue(capacity int, log logger.Logger) *CyclicQueue {
 }
 
 func (q *CyclicQueue) AddRequest(req request.Request) request.Request {
-	for !q.mutex.TryLock() {
-	}
+	q.mutex.Lock()
 	defer q.mutex.Unlock()
 
 	returnReq := req
@@ -70,8 +69,7 @@ func (q *CyclicQueue) AddRequest(req request.Request) request.Request {
 }
 
 func (q *CyclicQueue) GetRequest() request.Request {
-	for !q.mutex.TryLock() {
-	}
+	q.mutex.Lock()
 	defer q.mutex.Unlock()
 
 	if q.IsEmpty() {
@@ -86,16 +84,28 @@ func (q *CyclicQueue) GetRequest() request.Request {
 	return returnReq
 }
 
-func (q *CyclicQueue) StringQueueStatus() string {
+func (q *CyclicQueue) StringState() string {
 	sb := strings.Builder{}
 	sb.WriteString(fmt.Sprintf("Buffer[%v/%v]: [", q.size, cap(q.buffer)))
-	for i := 0; i < len(q.buffer); i++ {
-		if q.buffer[i].SourceID() != 0 {
-			sb.WriteString(fmt.Sprintf(" %v:%v", q.buffer[i].SourceID(), q.buffer[i].RequestID()))
-		} else {
-			sb.WriteString(" -")
+	if q.IsFull() {
+		for i := 0; i < cap(q.buffer); i++ {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("%v:%v", q.buffer[i].SourceID(), q.buffer[i].RequestID()))
+		}
+	} else {
+		for i := 0; i < cap(q.buffer); i++ {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			if (q.head <= q.tail && i >= q.head && i < q.tail) || (q.head > q.tail && (i >= q.head || i < q.tail)) {
+				sb.WriteString(fmt.Sprintf("%v:%v", q.buffer[i].SourceID(), q.buffer[i].RequestID()))
+			} else {
+				sb.WriteString("_")
+			}
 		}
 	}
-	sb.WriteString(" ].\n                   ")
+	sb.WriteString("].")
 	return sb.String()
 }

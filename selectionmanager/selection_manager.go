@@ -39,7 +39,6 @@ func (pm *SelectionManager) Start() bool {
 
 		for i := 0; i < cap(pm.processingSystemPool); i++ {
 			pm.processingSystemPool[i].Interrupt()
-			// fmt.Println(i)
 			for pm.processingSystemPool[i].Status() != -1 {
 			}
 		}
